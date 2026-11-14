@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZenSlide - Intelligent 3x3 Sliding Puzzle</title>
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Canvas Confetti Library -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      --board-size: min(90vw, 390px);
+      --tile-size: calc((var(--board-size) - 24px) / 3);
+    }
+
+    .puzzle-board {
+      width: var(--board-size);
+      height: var(--board-size);
+      position: relative;
+      touch-action: none;
+    }
+
+    .tile {
+      width: var(--tile-size);
+      height: var(--tile-size);
+      position: absolute;
+      transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+      will-change: transform;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Pulsing glow animation for hinted tile */
+    @keyframes hintPulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7);
+        border-color: rgba(234, 179, 8, 1);
+      }
+      50% {
+        box-shadow: 0 0 0 12px rgba(234, 179, 8, 0);
+        border-color: rgba(250, 204, 21, 1);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(234, 179, 8, 0);
+        border-color: rgba(234, 179, 8, 1);
+      }
+    }
+
+    .tile-hint {
+      animation: hintPulse 1.4s infinite cubic-bezier(0.4, 0, 0.6, 1);
+      border: 3px solid #eab308 !important;
+      z-index: 20;
+    }
+
+    /* Directional bouncing indicator */
+    @keyframes bounceUp {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-7px); }
+    }
+    @keyframes bounceDown {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(7px); }
+    }
+    @keyframes bounceLeft {
+      0%, 100% { transform: translateX(0); }
+      50% { transform: translateX(-7px); }
+    }
+    @keyframes bounceRight {
+      0%, 100% { transform: translateX(0); }
+      50% { transform: translateX(7px); }
+    }
+
+    .arrow-up { animation: bounceUp 0.8s infinite ease-in-out; }
+    .arrow-down { animation: bounceDown 0.8s infinite ease-in-out; }
+    .arrow-left { animation: bounceLeft 0.8s infinite ease-in-out; }
+    .arrow-right { animation: bounceRight 0.8s infinite ease-in-out; }
+
+    /* Frosted glass cards */
+    .glass-card {
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-emerald-50/30 to-amber-50/20 text-slate-800 min-h-screen flex flex-col items-center justify-between p-3 sm:p-6 font-sans select-none antialiased">
+
+  <!-- Top Navigation & Title Bar -->
+  <header class="w-full max-w-md flex items-center justify-between mb-2 sm:mb-4">
+    <div class="flex items-center space-x-2.5">
+      <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white shadow-md shadow-emerald-500/20">
+        <i data-lucide="layout-grid" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
+          ZenSlide
+          <span class="text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">3x3</span>
+        </h1>
+        <p class="text-xs text-slate-500 font-medium">Guaranteed solvable & guided</p>
+      </div>
+    </div>
+
+    <!-- Quick Audio & Mode Options -->
+    <div class="flex items-center gap-2">
+      <button id="soundToggleBtn" aria-label="Toggle Sound" class="p-2.5 rounded-xl bg-white border border-slate-200/80 shadow-sm hover:bg-slate-100 transition text-slate-600 active:scale-95">
+        <i data-lucide="volume-2" id="soundIcon" class="w-4 h-4"></i>
+      </button>
+      <button id="rulesBtn" aria-label="How to play" class="p-2.5 rounded-xl bg-white border border-slate-200/80 shadow-sm hover:bg-slate-100 transition text-slate-600 active:scale-95">
+        <i data-lucide="help-circle" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <main class="w-full max-w-md flex flex-col items-center">
+    <!-- Difficulty selection tabs -->
+    <div class="w-full flex p-1 bg-slate-200/80 rounded-2xl mb-3 sm:mb-4 text-xs font-semibold">
+      <button data-diff="easy" class="diff-btn flex-1 py-1.5 rounded-xl transition text-center text-slate-700 hover:text-slate-900">
+        Easy <span class="text-[10px] opacity-75 font-normal">(5-8 moves)</span>
+      </button>
+      <button data-diff="medium" class="diff-btn flex-1 py-1.5 rounded-xl transition text-center bg-white shadow-sm text-emerald-700 font-bold">
+        Medium <span class="text-[10px] opacity-75 font-normal">(14-18 moves)</span>
+      </button>
+      <button data-diff="hard" class="diff-btn flex-1 py-1.5 rounded-xl transition text-center text-slate-700 hover:text-slate-900">
+        Master <span class="text-[10px] opacity-75 font-normal">(Full scramble)</span>
+      </button>
+    </div>
+
+    <!-- Live Stat Bar -->
+    <div class="w-full glass-card border border-white/70 shadow-sm rounded-2xl p-3 mb-3 flex items-center justify-around">
+      <div class="text-center">
+        <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Moves</span>
+        <span id="moveCount" class="text-xl font-extrabold text-slate-800">0</span>
+      </div>
+      <div class="h-8 w-px bg-slate-200"></div>
+      <div class="text-center">
+        <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Time</span>
+        <span id="timerDisplay" class="text-xl font-extrabold text-slate-800">00:00</span>
+      </div>
+      <div class="h-8 w-px bg-slate-200"></div>
+      <div class="text-center">
+        <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Distance</span>
+        <span id="distDisplay" class="text-xl font-extrabold text-emerald-600">0</span>
+      </div>
+    </div>
+
+    <!-- Smart Struggle Helper Notification Banner -->
+    <div id="struggleBanner" class="w-full mb-3 px-3 py-2.5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 shadow-sm flex items-center justify-between transition-all duration-300 transform opacity-0 translate-y-2 pointer-events-none">
+      <div class="flex items-center space-x-2 text-xs font-semibold text-amber-900">
+        <div class="w-6 h-6 rounded-lg bg-amber-200/70 flex items-center justify-center text-amber-700">
+          <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+        </div>
+        <span>Feeling stuck? Take a free gentle hint!</span>
+      </div>
+      <button id="struggleHintAction" class="text-xs bg-amber-500 hover:bg-amber-600 text-white font-bold px-3 py-1 rounded-xl shadow-sm active:scale-95 transition">
+        Show Me
+      </button>
+    </div>
+
+    <!-- The Sliding Puzzle Board Frame -->
+    <div class="p-3 bg-slate-900 rounded-3xl shadow-xl shadow-slate-900/10 border-4 border-slate-800 relative">
+      <div id="puzzleBoard" class="puzzle-board bg-slate-950/60 rounded-2xl overflow-hidden relative">
+        <!-- 8 Dynamic Tiles populated via JS -->
+      </div>
+    </div>
+
+    <!-- Action Controls Toolbar -->
+    <div class="w-full grid grid-cols-3 gap-2.5 mt-4">
+      <button id="shuffleBtn" class="flex flex-col items-center justify-center py-2.5 px-3 rounded-2xl bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition text-slate-700 active:scale-95">
+        <i data-lucide="shuffle" class="w-5 h-5 text-slate-600 mb-1"></i>
+        <span class="text-xs font-bold">New Game</span>
+      </button>
+
+      <button id="hintBtn" class="flex flex-col items-center justify-center py-2.5 px-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white shadow-md shadow-amber-500/20 active:scale-95 transition">
+        <div class="flex items-center gap-1 mb-1">
+          <i data-lucide="lightbulb" class="w-5 h-5"></i>
+        </div>
+        <span class="text-xs font-bold">Get Hint</span>
+      </button>
+
+      <button id="autoSolveBtn" class="flex flex-col items-center justify-center py-2.5 px-3 rounded-2xl bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition text-slate-700 active:scale-95">
+        <i data-lucide="play" id="autoSolveIcon" class="w-5 h-5 text-emerald-600 mb-1"></i>
+        <span id="autoSolveLabel" class="text-xs font-bold text-slate-700">Auto Solve</span>
+      </button>
+    </div>
+
+    <!-- Toggle Hints & Visual Indicators -->
+    <div class="w-full flex items-center justify-between px-2 mt-3.5 text-xs text-slate-500 font-medium">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" id="homeMarkerCheckbox" checked class="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300">
+        <span>Show home badges</span>
+      </label>
+
+      <span class="text-slate-400">Arrow keys or click/tap to slide</span>
+    </div>
+  </main>
+
+  <!-- Modals and Overlays -->
+  <!-- 1. Victory Celebration Modal -->
+  <div id="winModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-300 p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl transform scale-90 transition-transform duration-300 border border-slate-100 flex flex-col items-center">
+      <div class="w-16 h-16 rounded-2xl bg-amber-100 text-amber-500 flex items-center justify-center mb-3 shadow-inner">
+        <i data-lucide="trophy" class="w-9 h-9"></i>
+      </div>
+      <h2 class="text-2xl font-black text-slate-900 mb-1">Brilliant Job!</h2>
+      <p class="text-sm text-slate-500 mb-4 font-medium">You solved the puzzle with true patience and precision.</p>
+
+      <div class="w-full bg-slate-50 rounded-2xl p-3 border border-slate-100 grid grid-cols-2 gap-2 mb-5">
+        <div class="p-2">
+          <span class="text-[11px] font-semibold uppercase text-slate-400 block">Total Moves</span>
+          <span id="finalMoves" class="text-xl font-bold text-slate-800">18</span>
+        </div>
+        <div class="p-2">
+          <span class="text-[11px] font-semibold uppercase text-slate-400 block">Total Time</span>
+          <span id="finalTime" class="text-xl font-bold text-slate-800">00:42</span>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-2 w-full">
+        <button id="playAgainBtn" class="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-lg shadow-emerald-600/25 active:scale-98 transition flex items-center justify-center gap-2">
+          <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+          Play Another Round
+        </button>
+        <button id="closeWinModal" class="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm transition">
+          View Solved Board
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Interactive Strategy & Rules Modal -->
+  <div id="rulesModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-300 p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+        <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="book-open" class="w-5 h-5 text-emerald-600"></i>
+          3x3 Strategy Guide
+        </h3>
+        <button id="closeRulesBtn" class="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div class="overflow-y-auto space-y-3.5 pr-1 text-xs sm:text-sm text-slate-600 leading-relaxed">
+        <div class="p-3 bg-emerald-50/70 border border-emerald-100 rounded-xl">
+          <strong class="text-emerald-900 font-bold block mb-1">The Human Solving Order:</strong>
+          1. Solve tile <strong class="text-emerald-700">1</strong> in the top-left.<br>
+          2. Pair tiles <strong class="text-emerald-700">2 &amp; 3</strong> together, then cycle them into row 1.<br>
+          3. Pair tiles <strong class="text-emerald-700">4 &amp; 7</strong> together in column 1.<br>
+          4. Simply rotate the final 4 remaining squares clockwise or counterclockwise!
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 mb-1">Gentle Hints &amp; Guidance</h4>
+          <p>Whenever you're unsure or taking your time, click <strong>Get Hint</strong>. We use an instant $A^*$ pathfinding solver to highlight the optimal single move with a bouncing arrow pointing exactly where to slide.</p>
+        </div>
+        <div>
+          <h4 class="font-bold text-slate-800 mb-1">Guaranteed Solvability</h4>
+          <p>Every single board generated here is created by legitimate random sliding permutations starting directly from the solved goal. No impossible parity errors ever!</p>
+        </div>
+      </div>
+      <button id="understoodBtn" class="mt-4 w-full py-2.5 bg-slate-900 text-white font-semibold rounded-xl hover:bg-slate-800 transition">
+        Let's Play
+      </button>
+    </div>
+  </div>
+
+  <footer class="mt-4 text-[11px] text-slate-400 text-center font-medium">
+    Designed for maximum satisfaction • Always solvable
+  </footer>
+
+  <script>
+    // --- Synthesized Sound Effects (No external audio files needed) ---
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      playSlide() {
+        if (!this.enabled) return;
+        this.init();
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          
+          osc.type = 'sine';
+          // Subtle pleasant woody wooden tap pitch drop
+          osc.frequency.setValueAtTime(420, this.ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(140, this.ctx.currentTime + 0.07);
+
+          gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.07);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start();
+          osc.stop(this.ctx.currentTime + 0.07);
+        } catch (e) {
+          // Audio safe catch
+        }
+      }
+
+      playHint() {
+        if (!this.enabled) return;
+        this.init();
+        try {
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(523.25, now); // C5
+          osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
+          osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
+
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start();
+          osc.stop(now + 0.32);
+        } catch (e) {}
+      }
+
+      playWin() {
+        if (!this.enabled) return;
+        this.init();
+        try {
+          const notes = [440, 554.37, 659.25, 880]; // A major triumphant chime
+          notes.forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            const start = this.ctx.currentTime + idx * 0.1;
+            
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, start);
+
+            gain.gain.setValueAtTime(0.18, start);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.45);
+
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+
+            osc.start(start);
+            osc.stop(start + 0.45);
+          });
+        } catch (e) {}
+      }
+    }
+
+    const sound = new SoundEngine();
+
+    /* STREAMING_CHUNK:Implementing A* Manhattan Distance Solver... */
+    // --- 8-Puzzle A* Optimal Solver ---
+    // Target state: [1, 2, 3, 4, 5, 6, 7, 8, 0] (0 denotes empty slot)
+    const GOAL_STATE = [1, 2, 3, 4, 5, 6, 7, 8, 0];
+
+    // Precalculate target coords for Manhattan Distance heuristic
+    const TARGET_COORDS = {};
+    GOAL_STATE.forEach((val, idx) => {
+      TARGET_COORDS[val] = { r: Math.floor(idx / 3), c: idx % 3 };
+    });
+
+    function getManhattanDistance(board) {
+      let distance = 0;
+      for (let i = 0; i < 9; i++) {
+        const val = board[i];
+        if (val !== 0) {
+          const target = TARGET_COORDS[val];
+          const currR = Math.floor(i / 3);
+          const currC = i % 3;
+          distance += Math.abs(currR - target.r) + Math.abs(currC - target.c);
+        }
+      }
+      return distance;
+    }
+
+    // Min-Priority Queue for A* search
+    class FastPriorityQueue {
+      constructor() {
+        this.heap = [];
+      }
+      push(item) {
+        this.heap.push(item);
+        this._siftUp();
+      }
+      pop() {
+        if (this.heap.length === 0) return null;
+        const top = this.heap[0];
+        const bottom = this.heap.pop();
+        if (this.heap.length > 0) {
+          this.heap[0] = bottom;
+          this._siftDown();
+        }
+        return top;
+      }
+      isEmpty() {
+        return this.heap.length === 0;
+      }
+      _siftUp() {
+        let node = this.heap.length - 1;
+        while (node > 0) {
+          const parent = (node - 1) >> 1;
+          if (this.heap[node].f < this.heap[parent].f) {
+            [this.heap[node], this.heap[parent]] = [this.heap[parent], this.heap[node]];
+            node = parent;
+          } else {
+            break;
+          }
+        }
+      }
+      _siftDown() {
+        let node = 0;
+        const length = this.heap.length;
+        while ((node << 1) + 1 < length) {
+          let left = (node << 1) + 1;
+          let right = left + 1;
+          let best = node;
+
+          if (this.heap[left].f < this.heap[best].f) best = left;
+          if (right < length && this.heap[right].f < this.heap[best].f) best = right;
+
+          if (best !== node) {
+            [this.heap[node], this.heap[best]] = [this.heap[best], this.heap[node]];
+            node = best;
+          } else {
+            break;
+          }
+        }
+      }
+    }
+
+    // Solves the puzzle from board state returning array of tile values to move
+    function solve8Puzzle(initialBoard) {
+      if (initialBoard.every((val, i) => val === GOAL_STATE[i])) {
+        return [];
+      }
+
+      const pq = new FastPriorityQueue();
+      const visited = new Map(); // boardKey -> lowest g
+
+      const initialKey = initialBoard.join(',');
+      const initialH = getManhattanDistance(initialBoard);
+
+      pq.push({
+        board: initialBoard.slice(),
+        emptyIdx: initialBoard.indexOf(0),
+        g: 0,
+        f: initialH,
+        movedTile: null,
+        parent: null
+      });
+
+      visited.set(initialKey, 0);
+
+      // Neighbor offsets on 3x3 grid: [rowDelta, colDelta]
+      const directions = [
+        { dr: -1, dc: 0 }, // Move tile into empty from above
+        { dr: 1, dc: 0 },  // Move tile into empty from below
+        { dr: 0, dc: -1 }, // Move tile into empty from left
+        { dr: 0, dc: 1 }   // Move tile into empty from right
+      ];
+
+      let iterations = 0;
+      const MAX_ITERATIONS = 40000;
+
+      while (!pq.isEmpty() && iterations++ < MAX_ITERATIONS) {
+        const current = pq.pop();
+        const { board, emptyIdx, g } = current;
+
+        // Check victory condition
+        let isGoal = true;
+        for (let i = 0; i < 9; i++) {
+          if (board[i] !== GOAL_STATE[i]) {
+            isGoal = false;
+            break;
+          }
+        }
+
+        if (isGoal) {
+          // Reconstruct path
+          const path = [];
+          let currNode = current;
+          while (currNode.parent !== null) {
+            path.push(currNode.movedTile);
+            currNode = currNode.parent;
+          }
+          return path.reverse();
+        }
+
+        const emptyR = Math.floor(emptyIdx / 3);
+        const emptyC = emptyIdx % 3;
+
+        for (const dir of directions) {
+          const tileR = emptyR + dir.dr;
+          const tileC = emptyC + dir.dc;
+
+          if (tileR >= 0 && tileR < 3 && tileC >= 0 && tileC < 3) {
+            const tileIdx = tileR * 3 + tileC;
+            const tileVal = board[tileIdx];
+
+            // Swap empty and tile
+            const nextBoard = board.slice();
+            nextBoard[emptyIdx] = tileVal;
+            nextBoard[tileIdx] = 0;
+
+            const nextKey = nextBoard.join('');
+            const nextG = g + 1;
+
+            if (!visited.has(nextKey) || nextG < visited.get(nextKey)) {
+              visited.set(nextKey, nextG);
+              const h = getManhattanDistance(nextBoard);
+              pq.push({
+                board: nextBoard,
+                emptyIdx: tileIdx,
+                g: nextG,
+                f: nextG + h,
+                movedTile: tileVal,
+                parent: current
+              });
+            }
+          }
+        }
+      }
+
+      return [];
+    }
+
+    // --- Application State ---
+    let board = [1, 2, 3, 4, 5, 6, 7, 8, 0]; // 0 is empty slot
+    let moves = 0;
+    let timer = 0;
+    let timerInterval = null;
+    let isPlaying = false;
+    let isSolved = true;
+    let difficulty = 'medium'; // easy | medium | hard
+    let currentHintTile = null;
+    let autoSolveInterval = null;
+    let isAutoSolving = false;
+
+    // Struggle detection
+    let lastActionTimestamp = Date.now();
+    let struggleCheckTimer = null;
+    let showHomeMarkers = true;
+
+    // DOM References
+    const puzzleBoardEl = document.getElementById('puzzleBoard');
+    const moveCountEl = document.getElementById('moveCount');
+    const timerDisplayEl = document.getElementById('timerDisplay');
+    const distDisplayEl = document.getElementById('distDisplay');
+    const struggleBanner = document.getElementById('struggleBanner');
+    const struggleHintAction = document.getElementById('struggleHintAction');
+    const hintBtn = document.getElementById('hintBtn');
+    const autoSolveBtn = document.getElementById('autoSolveBtn');
+    const autoSolveIcon = document.getElementById('autoSolveIcon');
+    const autoSolveLabel = document.getElementById('autoSolveLabel');
+    const shuffleBtn = document.getElementById('shuffleBtn');
+    const soundToggleBtn = document.getElementById('soundToggleBtn');
+    const soundIcon = document.getElementById('soundIcon');
+    const homeMarkerCheckbox = document.getElementById('homeMarkerCheckbox');
+    const winModal = document.getElementById('winModal');
+    const finalMovesEl = document.getElementById('finalMoves');
+    const finalTimeEl = document.getElementById('finalTime');
+    const playAgainBtn = document.getElementById('playAgainBtn');
+    const closeWinModal = document.getElementById('closeWinModal');
+    const rulesBtn = document.getElementById('rulesBtn');
+    const rulesModal = document.getElementById('rulesModal');
+    const closeRulesBtn = document.getElementById('closeRulesBtn');
+    const understoodBtn = document.getElementById('understoodBtn');
+
+    const tileElements = new Map(); // val -> DOM element
+
+    function initBoardDOM() {
+      puzzleBoardEl.innerHTML = '';
+      tileElements.clear();
+
+      for (let num = 1; num <= 8; num++) {
+        const tile = document.createElement('div');
+        tile.className = `tile rounded-2xl flex flex-col items-center justify-center font-black text-2xl sm:text-3xl cursor-pointer shadow-md bg-white border border-slate-200/90 text-slate-800 active:scale-95 transition-all`;
+        tile.dataset.value = num;
+
+        tile.innerHTML = `
+          <span class="tile-number">${num}</span>
+          <div class="home-indicator hidden absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-500"></div>
+          <div class="hint-arrow hidden absolute inset-0 flex items-center justify-center pointer-events-none text-amber-500 font-bold"></div>
+        `;
+
+        tile.addEventListener('click', () => handleTileClick(num));
+        puzzleBoardEl.appendChild(tile);
+        tileElements.set(num, tile);
+      }
+
+      updateTilePositions(false);
+    }
+
+    // Position tiles based on current board array
+    function updateTilePositions(animate = true) {
+      const boardWidth = puzzleBoardEl.clientWidth;
+      const tileSize = (boardWidth - 24) / 3; // gap is 8px
+      const gap = 8;
+      const padding = 4;
+
+      board.forEach((val, idx) => {
+        if (val !== 0) {
+          const tile = tileElements.get(val);
+          const row = Math.floor(idx / 3);
+          const col = idx % 3;
+
+          const x = padding + col * (tileSize + gap);
+          const y = padding + row * (tileSize + gap);
+
+          tile.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+          tile.style.width = `${tileSize}px`;
+          tile.style.height = `${tileSize}px`;
+
+          // Home badge visual check
+          const isHome = (val === idx + 1);
+          const indicator = tile.querySelector('.home-indicator');
+          if (showHomeMarkers && isHome) {
+            indicator.classList.remove('hidden');
+            tile.classList.add('border-emerald-200');
+            tile.classList.remove('border-slate-200/90');
+          } else {
+            indicator.classList.add('hidden');
+            tile.classList.remove('border-emerald-200');
+            tile.classList.add('border-slate-200/90');
+          }
+        }
+      });
+
+      distDisplayEl.innerText = getManhattanDistance(board);
+    }
+
+    window.addEventListener('resize', () => {
+      updateTilePositions(false);
+    });
+
+    function canMoveTile(tileVal) {
+      const tileIdx = board.indexOf(tileVal);
+      const emptyIdx = board.indexOf(0);
+      const tileR = Math.floor(tileIdx / 3);
+      const tileC = tileIdx % 3;
+      const emptyR = Math.floor(emptyIdx / 3);
+      const emptyC = emptyIdx % 3;
+
+      const isAdjacent = (Math.abs(tileR - emptyR) + Math.abs(tileC - emptyC)) === 1;
+      return { canMove: isAdjacent, tileIdx, emptyIdx, tileR, tileC, emptyR, emptyC };
+    }
+
+    function handleTileClick(tileVal) {
+      if (isAutoSolving) stopAutoSolve();
+      const moveInfo = canMoveTile(tileVal);
+      if (moveInfo.canMove) {
+        performMove(tileVal, moveInfo.tileIdx, moveInfo.emptyIdx);
+      }
+    }
+
+    function performMove(tileVal, tileIdx, emptyIdx) {
+      // Clear hints if present
+      clearHint();
+      dismissStrugglePrompt();
+
+      // Start timer on first move
+      if (!isPlaying && !isSolved) {
+        startTimer();
+      }
+
+      // Execute swap
+      board[emptyIdx] = tileVal;
+      board[tileIdx] = 0;
+      moves++;
+      moveCountEl.innerText = moves;
+
+      sound.playSlide();
+      updateTilePositions(true);
+
+      lastActionTimestamp = Date.now();
+
+      // Check win condition
+      checkWinCondition();
+    }
+
+    function startTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      isPlaying = true;
+      timer = 0;
+      timerInterval = setInterval(() => {
+        timer++;
+        const mins = String(Math.floor(timer / 60)).padStart(2, '0');
+        const secs = String(timer % 60).padStart(2, '0');
+        timerDisplayEl.innerText = `${mins}:${secs}`;
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = null;
+      isPlaying = false;
+    }
+
+    // Scramble board legally by performing valid backwards moves from solved state
+    function scrambleBoard(stepCount) {
+      clearHint();
+      dismissStrugglePrompt();
+      stopAutoSolve();
+      stopTimer();
+
+      board = [1, 2, 3, 4, 5, 6, 7, 8, 0];
+      moves = 0;
+      moveCountEl.innerText = '0';
+      timerDisplayEl.innerText = '00:00';
+      isSolved = false;
+
+      let prevTile = null;
+
+      for (let s = 0; s < stepCount; s++) {
+        const emptyIdx = board.indexOf(0);
+        const emptyR = Math.floor(emptyIdx / 3);
+        const emptyC = emptyIdx % 3;
+
+        const candidateIndices = [];
+        const deltas = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+        for (const [dr, dc] of deltas) {
+          const nr = emptyR + dr;
+          const nc = emptyC + dc;
+          if (nr >= 0 && nr < 3 && nc >= 0 && nc < 3) {
+            candidateIndices.push(nr * 3 + nc);
+          }
+        }
+
+        // Avoid immediately undoing previous move during scramble for good entropy
+        const filtered = candidateIndices.filter(idx => board[idx] !== prevTile);
+        const chosenIdx = filtered.length > 0
+          ? filtered[Math.floor(Math.random() * filtered.length)]
+          : candidateIndices[Math.floor(Math.random() * candidateIndices.length)];
+
+        const tileToSlide = board[chosenIdx];
+        board[emptyIdx] = tileToSlide;
+        board[chosenIdx] = 0;
+        prevTile = tileToSlide;
+      }
+
+      // If incidentally already solved, nudge once more
+      if (board.every((v, i) => v === GOAL_STATE[i])) {
+        const emptyIdx = board.indexOf(0);
+        const neighbor = emptyIdx === 8 ? 7 : emptyIdx + 1;
+        board[emptyIdx] = board[neighbor];
+        board[neighbor] = 0;
+      }
+
+      updateTilePositions(false);
+      lastActionTimestamp = Date.now();
+    }
+
+    function clearHint() {
+      if (currentHintTile !== null) {
+        const el = tileElements.get(currentHintTile);
+        if (el) {
+          el.classList.remove('tile-hint');
+          const arrowEl = el.querySelector('.hint-arrow');
+          arrowEl.classList.add('hidden');
+          arrowEl.innerHTML = '';
+        }
+        currentHintTile = null;
+      }
+    }
+
+    function triggerHint() {
+      if (isSolved) return;
+      clearHint();
+
+      const solutionMoves = solve8Puzzle(board);
+      if (!solutionMoves || solutionMoves.length === 0) return;
+
+      const nextTile = solutionMoves[0];
+      currentHintTile = nextTile;
+
+      const tileEl = tileElements.get(nextTile);
+      if (tileEl) {
+        tileEl.classList.add('tile-hint');
+        sound.playHint();
+
+        // Calculate direction to empty space
+        const tileIdx = board.indexOf(nextTile);
+        const emptyIdx = board.indexOf(0);
+        const tr = Math.floor(tileIdx / 3);
+        const tc = tileIdx % 3;
+        const er = Math.floor(emptyIdx / 3);
+        const ec = emptyIdx % 3;
+
+        const arrowEl = tileEl.querySelector('.hint-arrow');
+        arrowEl.className = 'hint-arrow absolute inset-0 flex items-center justify-center pointer-events-none text-amber-500';
+
+        let iconName = 'arrow-right';
+        let animClass = 'arrow-right';
+
+        if (er < tr) {
+          iconName = 'arrow-up';
+          animClass = 'arrow-up';
+        } else if (er > tr) {
+          iconName = 'arrow-down';
+          animClass = 'arrow-down';
+        } else if (ec < tc) {
+          iconName = 'arrow-left';
+          animClass = 'arrow-left';
+        } else if (ec > tc) {
+          iconName = 'arrow-right';
+          animClass = 'arrow-right';
+        }
+
+        arrowEl.innerHTML = `<i data-lucide="${iconName}" class="w-8 h-8 ${animClass} stroke-[3]"></i>`;
+        arrowEl.classList.remove('hidden');
+        lucide.createIcons();
+      }
+    }
+
+    function startStruggleDetector() {
+      if (struggleCheckTimer) clearInterval(struggleCheckTimer);
+      struggleCheckTimer = setInterval(() => {
+        if (!isSolved && !isAutoSolving) {
+          const idleTime = Date.now() - lastActionTimestamp;
+          // Prompt if player has paused for > 12 seconds
+          if (idleTime > 12000) {
+            showStrugglePrompt();
+          }
+        }
+      }, 2000);
+    }
+
+    function showStrugglePrompt() {
+      struggleBanner.classList.remove('opacity-0', 'translate-y-2', 'pointer-events-none');
+    }
+
+    function dismissStrugglePrompt() {
+      struggleBanner.classList.add('opacity-0', 'translate-y-2', 'pointer-events-none');
+    }
+
+    struggleHintAction.addEventListener('click', () => {
+      dismissStrugglePrompt();
+      triggerHint();
+    });
+
+    function toggleAutoSolve() {
+      if (isSolved) return;
+      if (isAutoSolving) {
+        stopAutoSolve();
+      } else {
+        startAutoSolve();
+      }
+    }
+
+    function startAutoSolve() {
+      clearHint();
+      dismissStrugglePrompt();
+      isAutoSolving = true;
+      autoSolveIcon.setAttribute('data-lucide', 'pause');
+      autoSolveLabel.innerText = 'Pause';
+      lucide.createIcons();
+
+      autoSolveInterval = setInterval(() => {
+        const solutionMoves = solve8Puzzle(board);
+        if (solutionMoves && solutionMoves.length > 0) {
+          const nextVal = solutionMoves[0];
+          const moveInfo = canMoveTile(nextVal);
+          if (moveInfo.canMove) {
+            performMove(nextVal, moveInfo.tileIdx, moveInfo.emptyIdx);
+          }
+        } else {
+          stopAutoSolve();
+        }
+      }, 280);
+    }
+
+    function stopAutoSolve() {
+      isAutoSolving = false;
+      if (autoSolveInterval) clearInterval(autoSolveInterval);
+      autoSolveInterval = null;
+      autoSolveIcon.setAttribute('data-lucide', 'play');
+      autoSolveLabel.innerText = 'Auto Solve';
+      lucide.createIcons();
+    }
+
+    function checkWinCondition() {
+      const won = board.every((val, idx) => val === GOAL_STATE[idx]);
+      if (won) {
+        isSolved = true;
+        stopTimer();
+        stopAutoSolve();
+        sound.playWin();
+
+        // Trigger celebratory canvas confetti blast
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+
+        setTimeout(() => {
+          confetti({
+            particleCount: 50,
+            angle: 60,
+            spread: 55,
+            origin: { x: 0 }
+          });
+          confetti({
+            particleCount: 50,
+            angle: 120,
+            spread: 55,
+            origin: { x: 1 }
+          });
+        }, 200);
+
+        // Display victory modal
+        finalMovesEl.innerText = moves;
+        finalTimeEl.innerText = timerDisplayEl.innerText;
+        winModal.classList.remove('opacity-0', 'pointer-events-none');
+        winModal.querySelector('div').classList.remove('scale-90');
+      }
+    }
+
+    // Difficulty Selection
+    document.querySelectorAll('.diff-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.diff-btn').forEach(b => {
+          b.className = 'diff-btn flex-1 py-1.5 rounded-xl transition text-center text-slate-700 hover:text-slate-900';
+        });
+        btn.className = 'diff-btn flex-1 py-1.5 rounded-xl transition text-center bg-white shadow-sm text-emerald-700 font-bold';
+
+        difficulty = btn.dataset.diff;
+        startNewGame();
+      });
+    });
+
+    function getShuffleSteps() {
+      switch (difficulty) {
+        case 'easy': return 6;
+        case 'medium': return 16;
+        case 'hard': return 45;
+        default: return 16;
+      }
+    }
+
+    function startNewGame() {
+      scrambleBoard(getShuffleSteps());
+    }
+
+    // Keyboard Arrow Keys navigation
+    window.addEventListener('keydown', (e) => {
+      if (isSolved) return;
+      const emptyIdx = board.indexOf(0);
+      const emptyR = Math.floor(emptyIdx / 3);
+      const emptyC = emptyIdx % 3;
+      let targetR = emptyR;
+      let targetC = emptyC;
+
+      // Pushing arrow keys moves tile toward the empty slot
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+        targetR = emptyR + 1; // Tile below moves UP into empty
+      } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+        targetR = emptyR - 1; // Tile above moves DOWN into empty
+      } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+        targetC = emptyC + 1; // Tile to right moves LEFT into empty
+      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+        targetC = emptyC - 1; // Tile to left moves RIGHT into empty
+      } else {
+        return;
+      }
+
+      if (targetR >= 0 && targetR < 3 && targetC >= 0 && targetC < 3) {
+        e.preventDefault();
+        const targetIdx = targetR * 3 + targetC;
+        const tileVal = board[targetIdx];
+        if (tileVal !== 0) {
+          handleTileClick(tileVal);
+        }
+      }
+    });
+
+    // Button event binds
+    shuffleBtn.addEventListener('click', startNewGame);
+    hintBtn.addEventListener('click', triggerHint);
+    autoSolveBtn.addEventListener('click', toggleAutoSolve);
+
+    soundToggleBtn.addEventListener('click', () => {
+      sound.enabled = !sound.enabled;
+      soundIcon.setAttribute('data-lucide', sound.enabled ? 'volume-2' : 'volume-x');
+      lucide.createIcons();
+    });
+
+    homeMarkerCheckbox.addEventListener('change', (e) => {
+      showHomeMarkers = e.target.checked;
+      updateTilePositions(false);
+    });
+
+    // Modal controls
+    closeWinModal.addEventListener('click', () => {
+      winModal.classList.add('opacity-0', 'pointer-events-none');
+    });
+    playAgainBtn.addEventListener('click', () => {
+      winModal.classList.add('opacity-0', 'pointer-events-none');
+      startNewGame();
+    });
+
+    rulesBtn.addEventListener('click', () => {
+      rulesModal.classList.remove('opacity-0', 'pointer-events-none');
+    });
+    closeRulesBtn.addEventListener('click', () => {
+      rulesModal.classList.add('opacity-0', 'pointer-events-none');
+    });
+    understoodBtn.addEventListener('click', () => {
+      rulesModal.classList.add('opacity-0', 'pointer-events-none');
+    });
+
+    // Touch Swipe handling on Board
+    let touchStartX = 0;
+    let touchStartY = 0;
+
+    puzzleBoardEl.addEventListener('touchstart', (e) => {
+      touchStartX = e.changedTouches[0].clientX;
+      touchStartY = e.changedTouches[0].clientY;
+    }, { passive: true });
+
+    puzzleBoardEl.addEventListener('touchend', (e) => {
+      const diffX = e.changedTouches[0].clientX - touchStartX;
+      const diffY = e.changedTouches[0].clientY - touchStartY;
+      const minSwipeDistance = 30;
+
+      if (Math.abs(diffX) > Math.abs(diffY)) {
+        if (Math.abs(diffX) > minSwipeDistance) {
+          const emptyIdx = board.indexOf(0);
+          const targetC = diffX > 0 ? (emptyIdx % 3) - 1 : (emptyIdx % 3) + 1;
+          const targetR = Math.floor(emptyIdx / 3);
+          if (targetC >= 0 && targetC < 3) {
+            handleTileClick(board[targetR * 3 + targetC]);
+          }
+        }
+      } else {
+        if (Math.abs(diffY) > minSwipeDistance) {
+          const emptyIdx = board.indexOf(0);
+          const targetR = diffY > 0 ? Math.floor(emptyIdx / 3) - 1 : Math.floor(emptyIdx / 3) + 1;
+          const targetC = emptyIdx % 3;
+          if (targetR >= 0 && targetR < 3) {
+            handleTileClick(board[targetR * 3 + targetC]);
+          }
+        }
+      }
+    }, { passive: true });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      initBoardDOM();
+      startNewGame();
+      startStruggleDetector();
+    });
+  </script>
+</body>
+</html>
